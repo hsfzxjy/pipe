@@ -8,8 +8,8 @@ import (
 
 // A listenable object that one can bind listeners to.
 type Listenable[T any] interface {
-	Bind(out chan<- T) CancelFunc
-	Listen() (out <-chan T, cancel CancelFunc)
+	Bind(out chan<- T) func()
+	Listen() (out <-chan T, cancel func())
 }
 
 // A listenable object that also memorizes the latest value.
@@ -23,7 +23,7 @@ type ListenableM[T any] interface {
 type ListenableC[T comparable] interface {
 	Listenable[T]
 	Until(...T)
-	UntilCh(...T) (<-chan struct{}, CancelFunc)
+	UntilCh(...T) (<-chan struct{}, func())
 	UntilContext(context.Context, ...T)
 }
 
@@ -51,7 +51,7 @@ func Until[T comparable, P Listenable[T]](b P, targets ...T) {
 // 1) one of the value from b shows up in targets;
 // 2) b does not accept new listeners (either b is detached or upstream channel closed);
 // 3) canceller is called.
-func UntilCh[T comparable, P Listenable[T]](b P, targets ...T) (signalCh <-chan struct{}, canceller CancelFunc) {
+func UntilCh[T comparable, P Listenable[T]](b P, targets ...T) (signalCh <-chan struct{}, canceller func()) {
 	out, cancel := b.Listen()
 	signal := make(chan struct{})
 	go func() {
@@ -119,7 +119,7 @@ func (b *broadcasterc[T]) Until(targets ...T) {
 }
 
 // Shorthand for UntilCh(b, targets...)
-func (b *broadcasterc[T]) UntilCh(targets ...T) (<-chan struct{}, CancelFunc) {
+func (b *broadcasterc[T]) UntilCh(targets ...T) (<-chan struct{}, func()) {
 	return UntilCh(b, targets...)
 }
 

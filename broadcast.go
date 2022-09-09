@@ -4,8 +4,6 @@ import (
 	"sync"
 )
 
-type CancelFunc func()
-
 func noop() {}
 
 // broadcaster[T] multiplexes values from inCh to several listeners.
@@ -201,7 +199,7 @@ func (b *broadcaster[T]) loop() {
 
 func (b *broadcaster[T]) current() T { return b.buf.value }
 
-// Detach prematurely detaches the broadcaster from the upstream channel. 
+// Detach prematurely detaches the broadcaster from the upstream channel.
 // No more values from upstream channel would be broadcasted, and no more new listeners
 // should be registered.
 func (b *broadcaster[T]) Detach() {
@@ -215,7 +213,7 @@ func (b *broadcaster[T]) Detach() {
 // If the input channel closed or the broadcaster detached, out will be closed immediately.
 // A canceller is returned for canceling the subscription. When called, out will be
 // unregistered and closed.
-func (b *broadcaster[T]) Bind(out chan<- T) CancelFunc {
+func (b *broadcaster[T]) Bind(out chan<- T) func() {
 	var once sync.Once
 	cancelCh := make(chan struct{})
 	entry := &listener[T]{outCh: out, cancelCh: cancelCh}
@@ -237,7 +235,7 @@ func (b *broadcaster[T]) Bind(out chan<- T) CancelFunc {
 
 // Listen creates a new output channel and registers it as a new listener.
 // The output channel and corresponding canceller is returned.
-func (b *broadcaster[T]) Listen() (<-chan T, CancelFunc) {
+func (b *broadcaster[T]) Listen() (<-chan T, func()) {
 	out := make(chan T)
 	return out, b.Bind(out)
 }
