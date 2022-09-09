@@ -182,7 +182,7 @@ a := make(chan int)
 b := make(chan string)
 c := make(chan float64)
 d := make(chan byte)
-r := pipe.Converge2(a, b)
+r := pipe.ConvergeN(a, b, c, d)
 go func() {
     a <- 42
     b <- "foo"
