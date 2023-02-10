@@ -85,7 +85,14 @@ func UntilContext[T comparable, P Listenable[T]](ctx context.Context, b P, targe
 	}
 }
 
-type Broadcaster[T any] struct{ broadcaster[T] }
+type detachableBroadcaster[T any] struct{ broadcaster[T] }
+
+// Detach prematurely detaches the broadcaster from the upstream channel.
+// No more values from upstream channel would be broadcasted, and no more new listeners
+// should be registered.
+func (b *detachableBroadcaster[T]) Detach() { b.detach() }
+
+type Broadcaster[T any] struct{ detachableBroadcaster[T] }
 
 // Broadcast returns a Broadcaster that pipes values from upstream channel into listeners.
 // Broadcaster gaurantees upstream <- val from outside will NOT block, but if it's detached
@@ -93,10 +100,11 @@ type Broadcaster[T any] struct{ broadcaster[T] }
 func Broadcast[T any](upstream <-chan T) *Broadcaster[T] {
 	b := new(Broadcaster[T])
 	b.init(upstream, nil)
+	b.ensureInit()
 	return b
 }
 
-type BroadcasterM[T any] struct{ broadcaster[T] }
+type BroadcasterM[T any] struct{ detachableBroadcaster[T] }
 
 // BroadcastM returns a broadcaster that memorizes the latest value from upstream.
 // Newly registered listener will be firstly fed with the memorized latest value, then subsequent values from upstream.
@@ -105,6 +113,7 @@ type BroadcasterM[T any] struct{ broadcaster[T] }
 func BroadcastM[T any](upstream <-chan T, initial T) *BroadcasterM[T] {
 	b := new(BroadcasterM[T])
 	b.init(upstream, &initial)
+	b.ensureInit()
 	return b
 }
 
@@ -128,6 +137,13 @@ func (b *broadcasterc[T]) UntilContext(ctx context.Context, targets ...T) {
 	UntilContext(ctx, b, targets...)
 }
 
+type detachableBroadcasterC[T comparable] struct{ broadcasterc[T] }
+
+// Detach prematurely detaches the broadcaster from the upstream channel.
+// No more values from upstream channel would be broadcasted, and no more new listeners
+// should be registered.
+func (b *detachableBroadcasterC[T]) Detach() { b.detach() }
+
 type BroadcasterC[T comparable] struct{ broadcasterc[T] }
 
 // BroadcastC returns a broadcaster with a comparable type T as element type.
@@ -136,16 +152,18 @@ type BroadcasterC[T comparable] struct{ broadcasterc[T] }
 func BroadcastC[T comparable](in <-chan T) *BroadcasterC[T] {
 	b := new(BroadcasterC[T])
 	b.init(in, nil)
+	b.ensureInit()
 	return b
 }
 
-type BroadcasterCM[T comparable] struct{ broadcasterc[T] }
+type BroadcasterCM[T comparable] struct{ detachableBroadcasterC[T] }
 
 // BroadcastCM returns a broadcaster with comparable element type and also
 // is able to memorize the latest value.
 func BroadcastCM[T comparable](in <-chan T, initial T) *BroadcasterCM[T] {
 	b := new(BroadcasterCM[T])
 	b.init(in, &initial)
+	b.ensureInit()
 	return b
 }
 
