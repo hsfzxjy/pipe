@@ -1,6 +1,70 @@
 package pipe
 
+import "sync"
+
+var barrierPool = sync.Pool{
+	New: func() any { return make(chan struct{}) },
+}
+
 type selectResult[T any] struct{ dead, starved *listener[T] }
+
+func selectStarved1[T any](head *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
+	select {
+	case <-barrier:
+		reply <- selectResult[T]{}
+	case <-head.cancelCh:
+		reply <- selectResult[T]{dead: head, starved: head}
+	}
+}
+
+func selectStarved2[T any](entry0, entry1 *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
+	select {
+	case <-barrier:
+		reply <- selectResult[T]{}
+	case <-entry0.cancelCh:
+		reply <- selectResult[T]{dead: entry0, starved: entry0}
+	case <-entry1.cancelCh:
+		reply <- selectResult[T]{dead: entry1, starved: entry1}
+	}
+}
+
+func selectStarved4[T any](entries [4]*listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
+	select {
+	case <-barrier:
+		reply <- selectResult[T]{}
+	case <-entries[0].cancelCh:
+		reply <- selectResult[T]{dead: entries[0], starved: entries[0]}
+	case <-entries[1].cancelCh:
+		reply <- selectResult[T]{dead: entries[1], starved: entries[1]}
+	case <-entries[2].cancelCh:
+		reply <- selectResult[T]{dead: entries[2], starved: entries[2]}
+	case <-entries[3].cancelCh:
+		reply <- selectResult[T]{dead: entries[3], starved: entries[3]}
+	}
+}
+
+func selectStarved8[T any](entries [8]*listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
+	select {
+	case <-barrier:
+		reply <- selectResult[T]{}
+	case <-entries[0].cancelCh:
+		reply <- selectResult[T]{dead: entries[0], starved: entries[0]}
+	case <-entries[1].cancelCh:
+		reply <- selectResult[T]{dead: entries[1], starved: entries[1]}
+	case <-entries[2].cancelCh:
+		reply <- selectResult[T]{dead: entries[2], starved: entries[2]}
+	case <-entries[3].cancelCh:
+		reply <- selectResult[T]{dead: entries[3], starved: entries[3]}
+	case <-entries[4].cancelCh:
+		reply <- selectResult[T]{dead: entries[4], starved: entries[4]}
+	case <-entries[5].cancelCh:
+		reply <- selectResult[T]{dead: entries[5], starved: entries[5]}
+	case <-entries[6].cancelCh:
+		reply <- selectResult[T]{dead: entries[6], starved: entries[6]}
+	case <-entries[7].cancelCh:
+		reply <- selectResult[T]{dead: entries[7], starved: entries[7]}
+	}
+}
 
 func select1[T any](head *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
 	select {
@@ -17,8 +81,7 @@ func select1[T any](head *listener[T], reply chan<- selectResult[T], barrier <-c
 	}
 }
 
-func select2[T any](head *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
-	entry0, entry1 := head, head.next
+func select2[T any](entry0, entry1 *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
 	select {
 	case <-barrier:
 		reply <- selectResult[T]{}
@@ -41,12 +104,7 @@ func select2[T any](head *listener[T], reply chan<- selectResult[T], barrier <-c
 	}
 }
 
-func select4[T any](head *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
-	var entries [4]*listener[T]
-	for i := 0; i < 4; i++ {
-		entries[i] = head
-		head = head.next
-	}
+func select4[T any](entries [4]*listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
 	select {
 	case <-barrier:
 		reply <- selectResult[T]{}
@@ -86,12 +144,7 @@ func select4[T any](head *listener[T], reply chan<- selectResult[T], barrier <-c
 	}
 }
 
-func select8[T any](head *listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
-	var entries [8]*listener[T]
-	for i := 0; i < 8; i++ {
-		entries[i] = head
-		head = head.next
-	}
+func select8[T any](entries [8]*listener[T], reply chan<- selectResult[T], barrier <-chan struct{}) {
 	select {
 	case <-barrier:
 		reply <- selectResult[T]{}

@@ -2,6 +2,7 @@ package pipe
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 func noop() {}
@@ -20,37 +21,52 @@ type broadcaster[T any] struct {
 	// starvedList holds listeners that is waiting for new values
 	starvedList listenerList[T]
 	// buf stores previous received value
-	buf *bufNode[T]
+	buf atomic.Pointer[bufNode[T]]
 	// memorized indicates whether send previous received value
 	// to newly registered listener
 	memorized bool
+
+	initOnce once
 }
 
 func (b *broadcaster[T]) init(in <-chan T, initial *T) {
 	b.inCh = in
-	b.diedCh = make(chan struct{})
-	b.listenerCh = make(chan *listener[T])
 	b.activeList.init()
 	b.starvedList.init()
 	if initial == nil {
-		b.buf = nil
+		b.buf.Store(nil)
 	} else {
-		b.buf = &bufNode[T]{value: *initial}
+		b.buf.Store(&bufNode[T]{value: *initial})
 	}
 	b.memorized = initial != nil
-	go b.loop()
 }
 
-func (b *broadcaster[T]) doSelect(isCleaning bool) (isDied bool) {
-	reply := make(chan selectResult[T])
-	var listener *listener[T]
+func (b *broadcaster[T]) initialized() bool {
+	return b.initOnce.Done()
+}
+
+func (b *broadcaster[T]) ensureInit() {
+	b.initOnce.Do(func() {
+		b.diedCh = make(chan struct{})
+		b.listenerCh = make(chan *listener[T])
+		go b.loop()
+	})
+}
+
+func (b *broadcaster[T]) doSelect(
+	activeBuf, starvedBuf []*listener[T],
+	barrier chan struct{},
+	reply chan selectResult[T],
+	isCleaning bool,
+) (isDied bool) {
+	type _listenerType = listener[T]
+	var listener *_listenerType
 	var value T
 	var ok bool
 	var recvEntry bool
 	var recvValue bool
 	var nWaiting = 0
 
-	barrier := make(chan struct{})
 	if !isCleaning {
 		nWaiting++
 		selectorPond.tasks <- func() {
@@ -64,42 +80,114 @@ func (b *broadcaster[T]) doSelect(isCleaning bool) (isDied bool) {
 			reply <- selectResult[T]{}
 		}
 	}
-	n := b.activeList.len
-	head := b.activeList.root.next
-	for n > 0 {
-		switch {
-		case n >= 8:
-			h := head
-			head = head.next.next.next.next.next.next.next.next
-			selectorPond.tasks <- func() {
-				select8(h, reply, barrier)
+	head := b.activeList.root
+	if head != nil {
+		n := 1
+		p := head
+		activeBuf[0] = p
+	ENUMERATE:
+		for {
+			for n < 8 && p.next != head {
+				p = p.next
+				activeBuf[n] = p
+				n++
 			}
-			nWaiting++
-			n -= 8
-		case n >= 4:
-			h := head
-			head = head.next.next.next.next
-			selectorPond.tasks <- func() {
-				select4(h, reply, barrier)
+			switch {
+			case n == 8:
+				b := [8]*_listenerType(activeBuf)
+				selectorPond.tasks <- func() {
+					select8(b, reply, barrier)
+				}
+				nWaiting++
+			default:
+				buf := activeBuf
+				if n >= 4 {
+					b := [4]*_listenerType(activeBuf)
+					buf = buf[4:]
+					selectorPond.tasks <- func() {
+						select4(b, reply, barrier)
+					}
+					nWaiting++
+					n -= 4
+				}
+
+				if n >= 2 {
+					e0, e1 := buf[0], buf[1]
+					buf = buf[2:]
+					selectorPond.tasks <- func() {
+						select2(e0, e1, reply, barrier)
+					}
+					nWaiting++
+					n -= 2
+				}
+
+				if n == 1 {
+					e := buf[0]
+					selectorPond.tasks <- func() {
+						select1(e, reply, barrier)
+					}
+					nWaiting++
+					n -= 1
+				}
+
+				break ENUMERATE
 			}
-			nWaiting++
-			n -= 4
-		case n >= 2:
-			h := head
-			head = head.next.next
-			selectorPond.tasks <- func() {
-				select2(h, reply, barrier)
+			n = 0
+		}
+	}
+	head = b.starvedList.root
+	if head != nil {
+		n := 1
+		p := head
+		starvedBuf[0] = p
+	ENUMERATE_STARVE:
+		for {
+			for n < 8 && p.next != head {
+				p = p.next
+				starvedBuf[n] = p
+				n++
 			}
-			nWaiting++
-			n -= 2
-		case n >= 1:
-			h := head
-			head = head.next
-			selectorPond.tasks <- func() {
-				select1(h, reply, barrier)
+			switch {
+			case n == 8:
+				b := [8]*_listenerType(starvedBuf)
+				selectorPond.tasks <- func() {
+					selectStarved8(b, reply, barrier)
+				}
+				nWaiting++
+			default:
+				buf := starvedBuf
+				if n >= 4 {
+					b := [4]*_listenerType(starvedBuf)
+					buf = buf[4:]
+					selectorPond.tasks <- func() {
+						selectStarved4(b, reply, barrier)
+					}
+					nWaiting++
+					n -= 4
+				}
+
+				if n >= 2 {
+					e0, e1 := buf[0], buf[1]
+					buf = buf[2:]
+					selectorPond.tasks <- func() {
+						selectStarved2(e0, e1, reply, barrier)
+					}
+					nWaiting++
+					n -= 2
+				}
+
+				if n == 1 {
+					e := buf[0]
+					selectorPond.tasks <- func() {
+						selectStarved1(e, reply, barrier)
+					}
+					nWaiting++
+					n -= 1
+				}
+
+				break ENUMERATE_STARVE
 			}
-			nWaiting++
-			n -= 1
+			n = 0
 		}
 	}
 	notResolvedYet := true
@@ -119,12 +207,16 @@ func (b *broadcaster[T]) doSelect(isCleaning bool) (isDied bool) {
 	HANDLE_REPLY:
 		switch {
 		case r.dead != nil:
+			if r.starved != nil {
+				b.starvedList.drop(r.dead)
+			} else {
+				b.activeList.drop(r.dead)
+			}
 			r.dead.finalize()
-			b.activeList.drop(r.dead)
 		case r.starved != nil:
 			if isCleaning {
-				r.starved.finalize()
 				b.activeList.drop(r.starved)
+				r.starved.finalize()
 			} else {
 				b.activeList.drop(r.starved)
 				b.starvedList.append(r.starved)
@@ -136,30 +228,22 @@ func (b *broadcaster[T]) doSelect(isCleaning bool) (isDied bool) {
 	switch {
 	case recvEntry:
 		if listener == nil {
+			// signal to die
 			return true
 		}
 		if listener.outCh == nil {
+			// registering nil chan, noop
 			return false
 		}
 		select {
 		case <-listener.cancelCh:
-			if listener.newBuf != nil {
-				// listener was registered on one of the two lists
-				if listener.buf != nil {
-					b.activeList.drop(listener)
-				} else {
-					b.starvedList.drop(listener)
-				}
-				listener.finalize()
-			} else {
-				// listener was canceled before registered
-				listener.finalize()
-			}
+			// listener was canceled before registered
+			listener.finalize()
 			return false
 		default:
 		}
 		if b.memorized {
-			listener.buf = b.buf
+			listener.buf = b.buf.Load()
 		}
 		listener.newBuf = &b.buf
 		if listener.buf == nil {
@@ -172,37 +256,64 @@ func (b *broadcaster[T]) doSelect(isCleaning bool) (isDied bool) {
 			return true
 		}
 		node := &bufNode[T]{value: value}
-		if b.buf != nil {
-			b.buf.next = node
+		{
+			buf := b.buf.Load()
+			if buf != nil {
+				buf.next = node
+			}
+			b.buf.Store(node)
 		}
-		b.buf = node
 		b.starvedList.spliceTo(&b.activeList)
 	}
 	return false
 }
 
 func (b *broadcaster[T]) loop() {
+	var activeBuf, starvedBuf [8]*listener[T]
+	reply := make(chan selectResult[T])
+	barrier := barrierPool.Get().(chan struct{})
 	for {
-		if died := b.doSelect(false); died {
+		if died := b.doSelect(
+			activeBuf[:], starvedBuf[:],
+			barrier, reply,
+			false); died {
 			break
 		}
 	}
 	close(b.diedCh)
-	for h := b.starvedList.root.next; h != &b.starvedList.root; h = h.next {
-		close(h.outCh)
+	{
+		p := b.starvedList.root
+		sentinel := p
+		if p == nil {
+			goto DONE
+		}
+	LOOP:
+		close(p.outCh)
+		p = p.next
+		if p != sentinel {
+			goto LOOP
+		}
+	DONE:
 	}
 	b.starvedList.init()
-	for b.activeList.len != 0 {
-		b.doSelect(true)
+	for !b.activeList.isEmpty() {
+		b.doSelect(
+			activeBuf[:], starvedBuf[:],
+			barrier, reply,
+			true)
 	}
+	barrierPool.Put(barrier)
 }
 
-func (b *broadcaster[T]) current() T { return b.buf.value }
+func (b *broadcaster[T]) current() T {
+	buf := b.buf.Load()
+	return buf.value
+}
 
-// Detach prematurely detaches the broadcaster from the upstream channel.
-// No more values from upstream channel would be broadcasted, and no more new listeners
-// should be registered.
-func (b *broadcaster[T]) Detach() {
+func (b *broadcaster[T]) detach() {
+	if !b.initialized() {
+		return
+	}
 	select {
 	case <-b.diedCh:
 	case b.listenerCh <- nil:
@@ -214,9 +325,12 @@ func (b *broadcaster[T]) Detach() {
 // A canceller is returned for canceling the subscription. When called, out will be
 // unregistered and closed.
 func (b *broadcaster[T]) Bind(out chan<- T) func() {
+	b.ensureInit()
 	var once sync.Once
 	cancelCh := make(chan struct{})
-	entry := &listener[T]{outCh: out, cancelCh: cancelCh}
+	entry := newListener[T]()
+	entry.outCh = out
+	entry.cancelCh = cancelCh
 	select {
 	case <-b.diedCh:
 		return noop
@@ -225,10 +339,6 @@ func (b *broadcaster[T]) Bind(out chan<- T) func() {
 	return func() {
 		once.Do(func() {
 			close(cancelCh)
-			select {
-			case b.listenerCh <- entry:
-			case <-b.diedCh:
-			}
 		})
 	}
 }
