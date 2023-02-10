@@ -50,23 +50,26 @@ func TestBroadcastBind2(t *testing.T) {
 	}
 }
 
-func TestBroadcastBind12(t *testing.T) {
-	ch := make(chan int)
-	b := pipe.Broadcast(ch)
-	defer b.Detach()
-	outs := make([]<-chan int, 12)
-	for i := 0; i < 12; i++ {
-		outs[i], _ = b.Listen()
-	}
-	for i := 0; i < 12; i++ {
-		ch <- i
-	}
-	for j := 0; j < 12; j++ {
-		for i := 0; i < 12; i++ {
-			if <-outs[i] != j {
-				t.Fatalf("<-outs[%d] != %d", i, j)
+func TestBroadcastBind1to65(t *testing.T) {
+	for n := 1; n <= 35; n++ {
+		ch := make(chan int)
+		b := pipe.Broadcast(ch)
+		outs := make([]<-chan int, n)
+		for i := 0; i < n; i++ {
+			outs[i], _ = b.Listen()
+		}
+		for i := 0; i < n; i++ {
+			ch <- i
+		}
+		for j := 0; j < n; j++ {
+			for i := 0; i < n; i++ {
+				x := <-outs[i]
+				if x != j {
+					t.Fatalf("n=%d: <-outs[%d] != %d, but %d", n, i, j, x)
+				}
 			}
 		}
+		b.Detach()
 	}
 }
 
