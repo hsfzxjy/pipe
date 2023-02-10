@@ -1,5 +1,11 @@
 package pipe
 
+import (
+	"sync"
+	"sync/atomic"
+	"unsafe"
+)
+
 type bufNode[T any] struct {
 	value T
 	next  *bufNode[T]
@@ -9,8 +15,19 @@ type listener[T any] struct {
 	outCh      chan<- T
 	cancelCh   chan struct{}
 	buf        *bufNode[T]
-	newBuf     **bufNode[T]
+	newBuf     *atomic.Pointer[bufNode[T]]
 	prev, next *listener[T]
+}
+
+type untypedListener = listener[struct{}]
+
+var listenerPool = sync.Pool{
+	New: func() any { return &untypedListener{} },
+}
+
+func newListener[T any]() *listener[T] {
+	l := listenerPool.Get().(*untypedListener)
+	return (*listener[T])(unsafe.Pointer(l))
 }
 
 func (e *listener[T]) finalize() {
@@ -21,11 +38,12 @@ func (e *listener[T]) finalize() {
 	e.newBuf = nil
 	e.buf = nil
 	e.cancelCh = nil
+	listenerPool.Put((*untypedListener)(unsafe.Pointer(e)))
 }
 
 func (e *listener[T]) curItem() T {
 	if e.buf == nil {
-		e.buf = *e.newBuf
+		e.buf = e.newBuf.Load()
 	}
 	return e.buf.value
 }
@@ -36,21 +54,24 @@ func (e *listener[T]) advanceItem() (starved bool) {
 }
 
 type listenerList[T any] struct {
-	len  int
-	root listener[T]
+	root *listener[T]
 }
 
 func (l *listenerList[T]) init() {
-	root := &l.root
-	root.prev, root.next = root, root
+	l.root = nil
 }
 
 func (l *listenerList[T]) append(e *listener[T]) {
-	root := &l.root
-	oldBack := root.prev
-	oldBack.next, e.prev = e, oldBack
-	root.prev, e.next = e, root
-	l.len++
+	root := l.root
+	if root == nil {
+		l.root = e
+		e.next = e
+		e.prev = e
+	} else {
+		oldBack := root.prev
+		oldBack.next, root.prev = e, e
+		e.prev, e.next = oldBack, root
+	}
 }
 
 func (l *listenerList[T]) drop(e *listener[T]) {
@@ -58,22 +79,34 @@ func (l *listenerList[T]) drop(e *listener[T]) {
 		return
 	}
 	prev, next := e.prev, e.next
-	prev.next, next.prev = next, prev
+	if prev == next && next == e {
+		l.root = nil
+	} else {
+		prev.next, next.prev = next, prev
+		if e == l.root {
+			l.root = next
+		}
+	}
 	e.prev, e.next = nil, nil
-	l.len--
 }
 
 func (l *listenerList[T]) spliceTo(l2 *listenerList[T]) {
-	if l.len == 0 {
+	if l.root == nil {
 		return
 	}
-	root, root2 := &l.root, &l2.root
-	front, back, back2 := root.next, root.prev, root2.prev
-	back2.next = front
+	if l2.root == nil {
+		l2.root = l.root
+		l.root = nil
+		return
+	}
+	front, front2 := l.root, l2.root
+	back, back2 := front.prev, front2.prev
 	front.prev = back2
-	root2.prev = back
-	back.next = root2
-	l2.len += l.len
-	l.len = 0
-	root.prev, root.next = root, root
+	back2.next = front
+	front2.prev = back
+	back.next = front2
+
+	l.root = nil
 }
+
+func (l *listenerList[T]) isEmpty() bool { return l.root == nil }
