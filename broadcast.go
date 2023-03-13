@@ -25,6 +25,10 @@ type broadcaster[T any] struct {
 	// memorized indicates whether send previous received value
 	// to newly registered listener
 	memorized bool
+	// dedup indicates whether to broadcast newly arrived value
+	// if it is equal to previously arrived value
+	// this should only be set when T is comparable
+	dedup bool
 
 	initOnce once
 }
@@ -255,15 +259,19 @@ func (b *broadcaster[T]) doSelect(
 		if !ok {
 			return true
 		}
-		node := &bufNode[T]{value: value}
 		{
 			buf := b.buf.Load()
+			if b.dedup && buf != nil && any(buf.value) == any(value) {
+				goto DONT_STORE
+			}
+			node := &bufNode[T]{value: value}
 			if buf != nil {
 				buf.next = node
 			}
 			b.buf.Store(node)
 		}
 		b.starvedList.spliceTo(&b.activeList)
+	DONT_STORE:
 	}
 	return false
 }

@@ -95,10 +95,11 @@ type ControllerCM[T comparable] struct {
 }
 
 // A Controller with a comparable element type and memorizable broadcaster.
-func NewControllerCM[T comparable](initial T) *ControllerCM[T] {
+func NewControllerCM[T comparable](initial T, dedup bool) *ControllerCM[T] {
 	c := new(ControllerCM[T])
 	c.sink.ch = make(chan T)
 	c.broadcaster.init(c.sink.ch, &initial)
+	c.dedup = dedup
 	return c
 }
 

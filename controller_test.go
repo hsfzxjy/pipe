@@ -64,11 +64,31 @@ func TestControllerM(t *testing.T) {
 }
 
 func TestControllerCM(t *testing.T) {
-	c := pipe.NewControllerCM("0")
+	c := pipe.NewControllerCM("0", false)
 	if c.Send("noop") {
 		t.Fatal()
 	}
 	l, _ := c.Listen()
+	c.Sink() <- "foo"
+	if !c.Send("bar") {
+		t.Fatal()
+	}
+	close(c.Sink())
+	if <-l != "0" || <-l != "foo" || <-l != "bar" {
+		t.Fatal()
+	}
+	if _, ok := <-l; ok {
+		t.Fatal()
+	}
+}
+
+func TestControllerCMDedup(t *testing.T) {
+	c := pipe.NewControllerCM("0", true)
+	if c.Send("noop") {
+		t.Fatal()
+	}
+	l, _ := c.Listen()
+	c.Sink() <- "foo"
 	c.Sink() <- "foo"
 	if !c.Send("bar") {
 		t.Fatal()
