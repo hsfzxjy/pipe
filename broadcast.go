@@ -324,7 +324,7 @@ func (b *broadcaster[T]) detach() {
 // If the input channel closed or the broadcaster detached, out will be closed immediately.
 // A canceller is returned for canceling the subscription. When called, out will be
 // unregistered and closed.
-func (b *broadcaster[T]) Bind(out chan<- T) func() {
+func (b *broadcaster[T]) Bind(out chan<- T) (cancel func()) {
 	b.ensureInit()
 	var once sync.Once
 	cancelCh := make(chan struct{})
