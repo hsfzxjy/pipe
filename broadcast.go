@@ -259,21 +259,40 @@ func (b *broadcaster[T]) doSelect(
 		if !ok {
 			return true
 		}
-		{
-			buf := b.buf.Load()
-			if b.dedup && buf != nil && any(buf.value) == any(value) {
-				goto DONT_STORE
-			}
-			node := &bufNode[T]{value: value}
-			if buf != nil {
-				buf.next = node
-			}
-			b.buf.Store(node)
-		}
+		b.replaceBuf(value)
+		// {
+		// 	buf := b.buf.Load()
+		// 	if b.dedup && buf != nil && any(buf.value) == any(value) {
+		// 		goto DONT_STORE
+		// 	}
+		// 	node := &bufNode[T]{value: value}
+		// 	if buf != nil {
+		// 		buf.next = node
+		// 	}
+		// 	b.buf.Store(node)
+		// }
 		b.starvedList.spliceTo(&b.activeList)
-	DONT_STORE:
+		// DONT_STORE:
 	}
 	return false
+}
+
+func (b *broadcaster[T]) replaceBuf(value T) {
+	var new *bufNode[T]
+START:
+	old := b.buf.Load()
+	if b.dedup && old != nil && any(old.value) == any(value) {
+		return
+	}
+	if new == nil {
+		new = &bufNode[T]{value: value}
+	}
+	if old != nil {
+		old.next = new
+	}
+	if !b.buf.CompareAndSwap(old, new) {
+		goto START
+	}
 }
 
 func (b *broadcaster[T]) loop() {

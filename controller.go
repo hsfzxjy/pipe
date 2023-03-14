@@ -83,6 +83,7 @@ func (c *ControllerM[T]) Send(value T) (ok bool) {
 		c.ch <- value
 		return true
 	}
+	c.replaceBuf(value)
 	return false
 }
 
@@ -115,6 +116,7 @@ func (c *ControllerCM[T]) Send(value T) (ok bool) {
 		c.ch <- value
 		return true
 	}
+	c.replaceBuf(value)
 	return false
 }
 

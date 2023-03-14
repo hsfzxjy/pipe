@@ -55,7 +55,7 @@ func TestControllerM(t *testing.T) {
 		t.Fatal()
 	}
 	close(c.Sink())
-	if <-l != "0" || <-l != "foo" || <-l != "bar" {
+	if <-l != "noop" || <-l != "foo" || <-l != "bar" {
 		t.Fatal()
 	}
 	if _, ok := <-l; ok {
@@ -74,7 +74,7 @@ func TestControllerCM(t *testing.T) {
 		t.Fatal()
 	}
 	close(c.Sink())
-	if <-l != "0" || <-l != "foo" || <-l != "bar" {
+	if <-l != "noop" || <-l != "foo" || <-l != "bar" {
 		t.Fatal()
 	}
 	if _, ok := <-l; ok {
@@ -94,7 +94,7 @@ func TestControllerCMDedup(t *testing.T) {
 		t.Fatal()
 	}
 	close(c.Sink())
-	if <-l != "0" || <-l != "foo" || <-l != "bar" {
+	if <-l != "noop" || <-l != "foo" || <-l != "bar" {
 		t.Fatal()
 	}
 	if _, ok := <-l; ok {
