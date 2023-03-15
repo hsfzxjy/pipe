@@ -5,10 +5,41 @@ import (
 	"time"
 
 	"github.com/hsfzxjy/pipe"
+	"github.com/stretchr/testify/assert"
 )
 
-func closed[T any](ch <-chan T) {
-	for range ch {
+func never(t *testing.T, cond func() bool) {
+	assert.Never(t, cond,
+		100*time.Millisecond,
+		10*time.Millisecond)
+}
+
+func eventually(t *testing.T, cond func() bool) {
+	assert.Eventually(t, cond,
+		100*time.Millisecond,
+		10*time.Millisecond)
+}
+
+func nonblocking(t *testing.T, routine func()) {
+	var passed bool
+	go func() { routine(); passed = true }()
+	eventually(t, func() bool { return passed })
+}
+
+func blocking(t *testing.T, routine func()) {
+	var passed bool
+	go func() { routine(); passed = true }()
+	never(t, func() bool { return passed })
+}
+
+func closed[T any](ch <-chan T) func() bool {
+	return func() bool {
+		select {
+		case _, ok := <-ch:
+			return !ok
+		default:
+			return false
+		}
 	}
 }
 
@@ -16,11 +47,7 @@ func TestBroadcastNonBlocking(t *testing.T) {
 	ch := make(chan int)
 	b := pipe.Broadcast(ch)
 	defer b.Detach()
-	select {
-	case ch <- 1:
-	case <-time.After(1 * time.Second):
-		t.Error("timeout")
-	}
+	nonblocking(t, func() { ch <- 1 })
 }
 
 func TestBroadcastBindAfterSend(t *testing.T) {
@@ -29,13 +56,7 @@ func TestBroadcastBindAfterSend(t *testing.T) {
 	defer b.Detach()
 	ch <- 1
 	out, _ := b.Listen()
-	select {
-	case _, ok := <-out:
-		if ok {
-			t.Fatal("expect no value")
-		}
-	case <-time.After(10 * time.Millisecond):
-	}
+	blocking(t, func() { <-out })
 }
 
 func TestBroadcastBind2(t *testing.T) {
@@ -45,9 +66,8 @@ func TestBroadcastBind2(t *testing.T) {
 	out1, _ := b.Listen()
 	out2, _ := b.Listen()
 	ch <- 1
-	if <-out1 != 1 || <-out2 != 1 {
-		t.Fatal()
-	}
+	assert.Equal(t, 1, <-out1)
+	assert.Equal(t, 1, <-out2)
 }
 
 func TestBroadcastBind1to65(t *testing.T) {
@@ -64,9 +84,9 @@ func TestBroadcastBind1to65(t *testing.T) {
 		for j := 0; j < n; j++ {
 			for i := 0; i < n; i++ {
 				x := <-outs[i]
-				if x != j {
-					t.Fatalf("n=%d: <-outs[%d] != %d, but %d", n, i, j, x)
-				}
+				assert.Equal(t, x, j,
+					"n=%d, i=%d, j=%d, x=%d",
+					n, i, j, x)
 			}
 		}
 		b.Detach()
@@ -79,12 +99,11 @@ func TestBroadcastBind2Close(t *testing.T) {
 	out1, _ := b.Listen()
 	out2, _ := b.Listen()
 	ch <- 1
-	if <-out1 != 1 || <-out2 != 1 {
-		t.Fatal()
-	}
+	assert.Equal(t, 1, <-out1)
+	assert.Equal(t, 1, <-out2)
 	close(ch)
-	closed(out1)
-	closed(out2)
+	eventually(t, closed(out1))
+	eventually(t, closed(out2))
 }
 
 func TestBroadcastBindCancel(t *testing.T) {
@@ -95,8 +114,8 @@ func TestBroadcastBindCancel(t *testing.T) {
 	ch <- 1
 	cancel1()
 	cancel2()
-	closed(out1)
-	closed(out2)
+	eventually(t, closed(out1))
+	eventually(t, closed(out2))
 }
 
 func TestBroadcastBindCancelBeforeClose(t *testing.T) {
@@ -108,8 +127,8 @@ func TestBroadcastBindCancelBeforeClose(t *testing.T) {
 	cancel1()
 	cancel2()
 	close(ch)
-	closed(out1)
-	closed(out2)
+	eventually(t, closed(out1))
+	eventually(t, closed(out2))
 }
 
 func TestBroadcastBindCancelAfterClose(t *testing.T) {
@@ -121,8 +140,8 @@ func TestBroadcastBindCancelAfterClose(t *testing.T) {
 	close(ch)
 	cancel1()
 	cancel2()
-	closed(out1)
-	closed(out2)
+	eventually(t, closed(out1))
+	eventually(t, closed(out2))
 }
 
 func TestBroadcastMBind(t *testing.T) {
@@ -130,18 +149,12 @@ func TestBroadcastMBind(t *testing.T) {
 	b := pipe.BroadcastM(ch, 42)
 	out, cancel := b.Listen()
 	defer cancel()
-	if <-out != 42 {
-		t.Fatal()
-	}
+	assert.Equal(t, 42, <-out)
 	ch <- 1
-	if <-out != 1 {
-		t.Fatal()
-	}
+	assert.Equal(t, 1, <-out)
 	out2, cancel2 := b.Listen()
 	defer cancel2()
-	if <-out2 != 1 {
-		t.Fatal()
-	}
+	assert.Equal(t, 1, <-out2)
 	close(ch)
 }
 
@@ -149,21 +162,13 @@ func TestBroadcastCMUntil(t *testing.T) {
 	ch := make(chan int)
 	b := pipe.BroadcastCM(ch, 42)
 	go func() { ch <- 1 }()
-	b.Until(1)
+	nonblocking(t, func() { b.Until(1) })
 }
-
-// func TestBroadcastCMUntilCh(t *testing.T) {
-// 	ch := make(chan int)
-// 	b := pipe.BroadcastCM(ch, 42)
-// 	wait, _ := b.UntilCh(1)
-// 	ch <- 1
-// 	<-wait
-// }
 
 func TestBroadcastCMUntilChCancel(t *testing.T) {
 	ch := make(chan int)
 	b := pipe.BroadcastCM(ch, 42)
 	wait, cancel := b.UntilCh(1)
 	go cancel()
-	<-wait
+	nonblocking(t, func() { <-wait })
 }

@@ -4,100 +4,74 @@ import (
 	"testing"
 
 	"github.com/hsfzxjy/pipe"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestController(t *testing.T) {
 	c := pipe.NewController[string]()
-	if c.Send("noop") {
-		t.Fatal()
-	}
+	assert.False(t, c.Send("noop"))
 	l, _ := c.Listen()
 	c.Sink() <- "foo"
-	if !c.Send("bar") {
-		t.Fatal()
-	}
+	assert.True(t, c.Send("bar"))
 	close(c.Sink())
-	if <-l != "foo" || <-l != "bar" {
-		t.Fatal()
-	}
-	if _, ok := <-l; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, "foo", <-l)
+	assert.Equal(t, "bar", <-l)
+	_, ok := <-l
+	assert.False(t, ok)
 }
 
 func TestControllerC(t *testing.T) {
 	c := pipe.NewControllerC[string]()
-	if c.Send("noop") {
-		t.Fatal()
-	}
+	assert.False(t, c.Send("noop"))
 	l, _ := c.Listen()
 	c.Sink() <- "foo"
-	if !c.Send("bar") {
-		t.Fatal()
-	}
+	assert.True(t, c.Send("bar"))
 	close(c.Sink())
-	if <-l != "foo" || <-l != "bar" {
-		t.Fatal()
-	}
-	if _, ok := <-l; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, "foo", <-l)
+	assert.Equal(t, "bar", <-l)
+	_, ok := <-l
+	assert.False(t, ok)
 }
 
 func TestControllerM(t *testing.T) {
 	c := pipe.NewControllerM("0")
-	if c.Send("noop") {
-		t.Fatal()
-	}
+	assert.False(t, c.Send("noop"))
 	l, _ := c.Listen()
 	c.Sink() <- "foo"
-	if !c.Send("bar") {
-		t.Fatal()
-	}
+	assert.True(t, c.Send("bar"))
 	close(c.Sink())
-	if <-l != "noop" || <-l != "foo" || <-l != "bar" {
-		t.Fatal()
-	}
-	if _, ok := <-l; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, "noop", <-l)
+	assert.Equal(t, "foo", <-l)
+	assert.Equal(t, "bar", <-l)
+	_, ok := <-l
+	assert.False(t, ok)
 }
 
 func TestControllerCM(t *testing.T) {
 	c := pipe.NewControllerCM("0", false)
-	if c.Send("noop") {
-		t.Fatal()
-	}
+	assert.False(t, c.Send("noop"))
 	l, _ := c.Listen()
 	c.Sink() <- "foo"
-	if !c.Send("bar") {
-		t.Fatal()
-	}
+	assert.True(t, c.Send("bar"))
 	close(c.Sink())
-	if <-l != "noop" || <-l != "foo" || <-l != "bar" {
-		t.Fatal()
-	}
-	if _, ok := <-l; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, "noop", <-l)
+	assert.Equal(t, "foo", <-l)
+	assert.Equal(t, "bar", <-l)
+	_, ok := <-l
+	assert.False(t, ok)
 }
 
 func TestControllerCMDedup(t *testing.T) {
 	c := pipe.NewControllerCM("0", true)
-	if c.Send("noop") {
-		t.Fatal()
-	}
+	assert.False(t, c.Send("noop"))
 	l, _ := c.Listen()
 	c.Sink() <- "foo"
 	c.Sink() <- "foo"
-	if !c.Send("bar") {
-		t.Fatal()
-	}
+	assert.True(t, c.Send("bar"))
 	close(c.Sink())
-	if <-l != "noop" || <-l != "foo" || <-l != "bar" {
-		t.Fatal()
-	}
-	if _, ok := <-l; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, "noop", <-l)
+	assert.Equal(t, "foo", <-l)
+	assert.Equal(t, "bar", <-l)
+	_, ok := <-l
+	assert.False(t, ok)
 }

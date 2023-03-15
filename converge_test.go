@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/hsfzxjy/pipe"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestConverge2(t *testing.T) {
@@ -16,15 +17,10 @@ func TestConverge2(t *testing.T) {
 		close(a)
 		close(b)
 	}()
-	if <-c != 42 {
-		t.Fatal()
-	}
-	if <-c != "foo" {
-		t.Fatal()
-	}
-	if _, ok := <-c; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, 42, <-c)
+	assert.Equal(t, "foo", <-c)
+	_, ok := <-c
+	assert.False(t, ok)
 }
 
 func TestConverge3(t *testing.T) {
@@ -40,12 +36,11 @@ func TestConverge3(t *testing.T) {
 		close(b)
 		close(c)
 	}()
-	if <-d != 42 || <-d != "foo" || <-d != float32(3.14) {
-		t.Fatal()
-	}
-	if _, ok := <-d; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, 42, <-d)
+	assert.Equal(t, "foo", <-d)
+	assert.Equal(t, float32(3.14), <-d)
+	_, ok := <-d
+	assert.False(t, ok)
 }
 
 func TestConvergeN(t *testing.T) {
@@ -64,17 +59,14 @@ func TestConvergeN(t *testing.T) {
 		close(c)
 		close(d)
 	}()
-	if <-r != 42 || <-r != "foo" || <-r != float32(3.14) || <-r != byte(1) {
-		t.Fatal()
-	}
-	if _, ok := <-r; ok {
-		t.Fatal()
-	}
+	assert.Equal(t, 42, <-r)
+	assert.Equal(t, "foo", <-r)
+	assert.Equal(t, float32(3.14), <-r)
+	assert.Equal(t, byte(1), <-r)
 }
 
 func TestConverge0(t *testing.T) {
 	r := pipe.ConvergeN()
-	if _, ok := <-r; ok {
-		t.Fatal()
-	}
+	_, ok := <-r
+	assert.False(t, ok)
 }
