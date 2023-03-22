@@ -1,6 +1,7 @@
 package pipe_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -114,6 +115,36 @@ func TestBroadcastBindCancel(t *testing.T) {
 	ch <- 1
 	cancel1()
 	cancel2()
+	eventually(t, closed(out1))
+	eventually(t, closed(out2))
+}
+
+func TestBroadcastBindContext(t *testing.T) {
+	ch := make(chan int)
+	b := pipe.Broadcast(ch)
+	out1 := make(chan int)
+	out2 := make(chan int)
+	ctx, cancel := context.WithCancel(context.Background())
+	b.BindContext(ctx, out1)
+	b.BindContext(ctx, out2)
+	ch <- 1
+	assert.Equal(t, 1, <-out1)
+	assert.Equal(t, 1, <-out2)
+	cancel()
+	eventually(t, closed(out1))
+	eventually(t, closed(out2))
+}
+
+func TestBroadcastListenContext(t *testing.T) {
+	ch := make(chan int)
+	b := pipe.Broadcast(ch)
+	ctx, cancel := context.WithCancel(context.Background())
+	out1 := b.ListenContext(ctx)
+	out2 := b.ListenContext(ctx)
+	ch <- 1
+	assert.Equal(t, 1, <-out1)
+	assert.Equal(t, 1, <-out2)
+	cancel()
 	eventually(t, closed(out1))
 	eventually(t, closed(out2))
 }

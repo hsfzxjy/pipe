@@ -13,7 +13,7 @@ type bufNode[T any] struct {
 
 type listener[T any] struct {
 	outCh      chan<- T
-	cancelCh   chan struct{}
+	cancelCh   <-chan struct{}
 	buf        *bufNode[T]
 	newBuf     *atomic.Pointer[bufNode[T]]
 	prev, next *listener[T]

@@ -1,6 +1,7 @@
 package pipe
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 )
@@ -347,22 +348,29 @@ func (b *broadcaster[T]) detach() {
 	}
 }
 
+func (b *broadcaster[T]) bind(outCh chan<- T, cancelCh <-chan struct{}) (success bool) {
+	b.ensureInit()
+	entry := newListener[T]()
+	entry.outCh = outCh
+	entry.cancelCh = cancelCh
+	select {
+	case <-b.diedCh:
+		return false
+	case b.listenerCh <- entry:
+		return true
+	}
+}
+
 // Bind registers out as a new listener, which receives subsequent values from the upstream channel.
 // If the input channel closed or the broadcaster detached, out will be closed immediately.
 // A canceller is returned for canceling the subscription. When called, out will be
 // unregistered and closed.
 func (b *broadcaster[T]) Bind(out chan<- T) (cancel func()) {
-	b.ensureInit()
-	var once sync.Once
 	cancelCh := make(chan struct{})
-	entry := newListener[T]()
-	entry.outCh = out
-	entry.cancelCh = cancelCh
-	select {
-	case <-b.diedCh:
+	if !b.bind(out, cancelCh) {
 		return noop
-	case b.listenerCh <- entry:
 	}
+	var once sync.Once
 	return func() {
 		once.Do(func() {
 			close(cancelCh)
@@ -370,9 +378,21 @@ func (b *broadcaster[T]) Bind(out chan<- T) (cancel func()) {
 	}
 }
 
+// BindContext is similar to Bind, but will cancel when ctx is done.
+func (b *broadcaster[T]) BindContext(ctx context.Context, out chan<- T) {
+	b.bind(out, ctx.Done())
+}
+
 // Listen creates a new output channel and registers it as a new listener.
 // The output channel and corresponding canceller is returned.
 func (b *broadcaster[T]) Listen() (<-chan T, func()) {
 	out := make(chan T)
 	return out, b.Bind(out)
+}
+
+// ListenContext is similar to Listen, but will cancel when ctx is done.
+func (b *broadcaster[T]) ListenContext(ctx context.Context) <-chan T {
+	out := make(chan T)
+	b.BindContext(ctx, out)
+	return out
 }
