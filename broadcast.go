@@ -21,7 +21,7 @@ type broadcaster[T any] struct {
 	activeList listenerList[T]
 	// starvedList holds listeners that is waiting for new values
 	starvedList listenerList[T]
-	// buf stores previous received value
+	// buf stores previously received value
 	buf atomic.Pointer[bufNode[T]]
 	// memorized indicates whether send previous received value
 	// to newly registered listener
